@@ -1,0 +1,74 @@
+name: Deploy Next.js to EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy on EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -e
+
+            APP_DIR="/var/www/myshop"
+            BRANCH="main"
+            REPO_URL="https://github.com/${{ github.repository }}.git"
+
+            # Install system dependencies (Amazon Linux).
+            if command -v dnf >/dev/null 2>&1; then
+              sudo dnf -y update
+              sudo dnf -y install git curl
+            else
+              sudo yum -y update
+              sudo yum -y install git curl
+            fi
+
+            # Install Node.js 20 if missing.
+            if ! command -v node >/dev/null 2>&1; then
+              curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+              if command -v dnf >/dev/null 2>&1; then
+                sudo dnf -y install nodejs
+              else
+                sudo yum -y install nodejs
+              fi
+            fi
+
+            # Install PM2 globally if missing.
+            if ! command -v pm2 >/dev/null 2>&1; then
+              sudo npm install -g pm2
+            fi
+
+            # Clone repository if not present, otherwise update it.
+            if [ ! -d "$APP_DIR/.git" ]; then
+              sudo mkdir -p "$APP_DIR"
+              sudo chown -R "$USER":"$USER" "$APP_DIR"
+              git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+            else
+              cd "$APP_DIR"
+              git fetch origin "$BRANCH"
+              git checkout "$BRANCH"
+              git reset --hard "origin/$BRANCH"
+            fi
+
+            cd "$APP_DIR"
+
+            # Install app dependencies and build.
+            npm install
+            npm run build
+
+            # Start or restart app on port 3000.
+            pm2 delete myshop || true
+            pm2 start npm --name "myshop" -- start -- -p 3000
+            pm2 save
