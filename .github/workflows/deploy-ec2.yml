@@ -20,7 +20,7 @@ jobs:
           port: ${{ secrets.EC2_PORT || 22 }}
           script_stop: true
           script: |
-            set -e
+            set -euxo pipefail
 
             APP_DIR="/var/www/myshop"
             BRANCH="main"
